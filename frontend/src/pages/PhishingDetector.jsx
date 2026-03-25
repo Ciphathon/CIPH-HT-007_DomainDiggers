@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { useUser } from '@clerk/clerk-react'
 import { Link } from 'react-router-dom'
-import { analyzePhishing, getPhishingHistory, getPhishingStats } from '../api/secureiq.js'
+import { analyzePhishing, analyzeConversation, getPhishingHistory, getPhishingStats } from '../api/secureiq.js'
+import ConversationAnalyzer from '../components/ConversationAnalyzer.jsx'
+import PsychDimensions from '../components/PsychDimensions.jsx'
 
 const MSG_TYPES = ['Email', 'WhatsApp', 'SMS', 'Other']
 const INSTANT_PATTERNS = [
@@ -13,9 +15,11 @@ const INSTANT_PATTERNS = [
 
 export default function PhishingDetector() {
   const { user } = useUser()
+  const [tab, setTab] = useState('single') // single | thread
   const [msgType, setMsgType] = useState('Email')
   const [senderInfo, setSenderInfo] = useState('')
   const [message, setMessage] = useState('')
+  const [conversationText, setConversationText] = useState('')
   const [analyzing, setAnalyzing] = useState(false)
   const [result, setResult] = useState(null)
   const [history, setHistory] = useState([])
@@ -51,6 +55,28 @@ export default function PhishingDetector() {
     try {
       const res = await analyzePhishing({
         message_text: message,
+        message_type: msgType.toLowerCase(),
+        sender_info: senderInfo,
+        clerk_user_id: user?.id || 'anon',
+      })
+      setResult(res)
+      getPhishingHistory(user.id).then(setHistory).catch(() => {})
+      getPhishingStats(user.id).then(setStats).catch(() => {})
+    } catch {
+      setResult({ error: true, verdict: 'ERROR', risk_score: 0 })
+    }
+    setTimerActive(false)
+    setAnalyzing(false)
+  }
+
+  const analyzeThread = async () => {
+    if (!conversationText.trim()) return
+    setAnalyzing(true)
+    setResult(null)
+    setTimerActive(true)
+    try {
+      const res = await analyzeConversation({
+        conversation_text: conversationText,
         message_type: msgType.toLowerCase(),
         sender_info: senderInfo,
         clerk_user_id: user?.id || 'anon',
@@ -105,6 +131,23 @@ export default function PhishingDetector() {
         <div className="grid md:grid-cols-5 gap-8">
           <div className="md:col-span-3">
             <div className="flex gap-4 mb-4">
+              <button
+                className="label-sm"
+                onClick={() => setTab('single')}
+                style={{ textDecoration: tab === 'single' ? 'underline' : 'none', textDecorationColor: '#DC9F85' }}
+              >
+                SINGLE MESSAGE -
+              </button>
+              <button
+                className="label-sm"
+                onClick={() => setTab('thread')}
+                style={{ textDecoration: tab === 'thread' ? 'underline' : 'none', textDecorationColor: '#DC9F85' }}
+              >
+                CONVERSATION THREAD -
+              </button>
+            </div>
+
+            <div className="flex gap-4 mb-4">
               {MSG_TYPES.map(t => (
                 <button
                   key={t}
@@ -116,30 +159,57 @@ export default function PhishingDetector() {
                 </button>
               ))}
             </div>
-            <p className="label-sm mb-2">FROM:</p>
-            <input className="input-field mb-4" value={senderInfo} onChange={e => setSenderInfo(e.target.value)} />
-            <p className="label-sm mb-2">MESSAGE:</p>
-            <textarea
-              className="input-field"
-              style={{ minHeight: 240, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
-              value={message}
-              onChange={e => setMessage(e.target.value)}
-            />
-            <p className="label-sm mt-4 mb-2" style={{ color: '#35211A' }}>DETECTED PATTERNS:</p>
-            <div className="flex flex-wrap gap-2">
-              {instantFlags.map(f => (
-                <span key={f.label} className="label-sm px-2 py-1" style={{ border: `1px solid ${f.color}`, borderRadius: 2, color: f.color }}>
-                  {f.label}
-                </span>
-              ))}
-            </div>
-            <button className="btn-primary w-full mt-6" onClick={analyze} disabled={analyzing || !message.trim()}>ANALYZE -</button>
-            {analyzing && <p className="label-sm mt-3">RUNNING LOCAL AI ANALYSIS - <span style={{ color: '#DC9F85' }}>{timer.toFixed(1)}s</span></p>}
+
+            {tab === 'single' && (
+              <>
+                <p className="label-sm mb-2">FROM:</p>
+                <input className="input-field mb-4" value={senderInfo} onChange={e => setSenderInfo(e.target.value)} />
+                <p className="label-sm mb-2">MESSAGE:</p>
+                <textarea
+                  className="input-field"
+                  style={{ minHeight: 240, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+                  value={message}
+                  onChange={e => setMessage(e.target.value)}
+                />
+                <p className="label-sm mt-4 mb-2" style={{ color: '#35211A' }}>DETECTED PATTERNS:</p>
+                <div className="flex flex-wrap gap-2">
+                  {instantFlags.map(f => (
+                    <span key={f.label} className="label-sm px-2 py-1" style={{ border: `1px solid ${f.color}`, borderRadius: 2, color: f.color }}>
+                      {f.label}
+                    </span>
+                  ))}
+                </div>
+                <button className="btn-primary w-full mt-6" onClick={analyze} disabled={analyzing || !message.trim()}>ANALYZE -</button>
+                {analyzing && <p className="label-sm mt-3">RUNNING LOCAL AI ANALYSIS - <span style={{ color: '#DC9F85' }}>{timer.toFixed(1)}s</span></p>}
+              </>
+            )}
+
+            {tab === 'thread' && (
+              <>
+                <p className="label-sm mb-2">FROM (optional):</p>
+                <input className="input-field mb-4" value={senderInfo} onChange={e => setSenderInfo(e.target.value)} />
+                <p className="label-sm mb-2">CONVERSATION THREAD:</p>
+                <textarea
+                  className="input-field"
+                  placeholder={`Examples:\nCREDIBLE SUPPORT: Your account will be suspended.\nSCAM BOT: Act now and move to WhatsApp.\nHR DEPT: Transfer funds immediately.`}
+                  style={{ minHeight: 240, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+                  value={conversationText}
+                  onChange={e => setConversationText(e.target.value)}
+                />
+                <button className="btn-primary w-full mt-6" onClick={analyzeThread} disabled={analyzing || !conversationText.trim()}>
+                  ANALYZE THREAD -
+                </button>
+                {analyzing && <p className="label-sm mt-3">RUNNING LOCAL AI ANALYSIS - <span style={{ color: '#DC9F85' }}>{timer.toFixed(1)}s</span></p>}
+              </>
+            )}
           </div>
 
           <div className="md:col-span-2">
             {!result && <div className="card"><p className="body-copy">Verdict panel will appear after analysis.</p></div>}
-            {result && !result.error && (
+            {result && !result.error && tab === 'thread' && (
+              <ConversationAnalyzer analysis={result} />
+            )}
+            {result && !result.error && tab === 'single' && (
               <div className="space-y-4">
                 <div className="p-4 border" style={{ background: verdictStyle(result.verdict).bg, borderColor: verdictStyle(result.verdict).border, borderRadius: 4 }}>
                   <p className="label-sm mb-2">VERDICT HEADER</p>
@@ -162,6 +232,10 @@ export default function PhishingDetector() {
                     </p>
                   )}
                 </div>
+
+                {result.psychological_dimensions && result.psychological_dimensions.length > 0 && (
+                  <PsychDimensions dimensions={result.psychological_dimensions} />
+                )}
 
                 <button className={result.recommended_action === 'REPORT' ? 'btn-danger w-full' : 'btn-primary w-full'}>
                   {result.recommended_action === 'REPORT' ? 'REPORT THIS THREAT -' : 'SAFE RESPONSE -'}

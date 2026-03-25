@@ -2,13 +2,20 @@ import json
 from fastapi import APIRouter
 from pydantic import BaseModel
 from database import save_phishing_analysis, get_phishing_history, get_phishing_stats
-from ai.phishing_detector import analyze_message
+from ai.phishing_detector import analyze_message, analyze_conversation
 
 router = APIRouter(prefix="/phishing", tags=["phishing"])
 
 
 class PhishingRequest(BaseModel):
     message_text: str
+    message_type: str = "email"
+    sender_info: str = ""
+    clerk_user_id: str = "anonymous"
+
+
+class ConversationPhishingRequest(BaseModel):
+    conversation_text: str
     message_type: str = "email"
     sender_info: str = ""
     clerk_user_id: str = "anonymous"
@@ -30,6 +37,29 @@ async def analyze_phishing(req: PhishingRequest):
         "india_specific_scam": result.get("india_specific_scam"),
         "full_result": result,
     })
+
+    return result
+
+
+@router.post("/analyze-conversation")
+async def analyze_conversation_endpoint(req: ConversationPhishingRequest):
+    result = await analyze_conversation(req.conversation_text, req.message_type, req.sender_info)
+
+    # Store as a phishing analysis record for history/stats reuse.
+    await save_phishing_analysis(
+        {
+            "clerk_user_id": req.clerk_user_id,
+            "message_preview": (req.conversation_text or "")[:200],
+            "message_type": "conversation",
+            "risk_score": result.get("risk_score", 0),
+            "risk_level": result.get("risk_level"),
+            "verdict": result.get("verdict"),
+            "attack_type": result.get("attack_type"),
+            "is_phishing": result.get("is_phishing", False),
+            "india_specific_scam": result.get("india_specific_scam"),
+            "full_result": result,
+        }
+    )
 
     return result
 

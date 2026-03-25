@@ -29,6 +29,13 @@ export const verifyFix = (scanId, checkName, domain) =>
     domain,
   }).then(r => r.data)
 
+// ─── DNS Auto-fix ──────────────────────────────────────────────────────────
+export const generateAutoFix = (payload) =>
+  API.post('/api/autofix/generate-record', payload).then(r => r.data)
+
+export const verifyAutoFix = (payload) =>
+  API.post('/api/autofix/verify-applied', payload).then(r => r.data)
+
 // ─── Chat ─────────────────────────────────────────────────────────────────────
 export const sendChatMessage = (message, scanContext, clerkUserId) =>
   API.post('/api/chat', {
@@ -50,6 +57,13 @@ export const downloadCertificate = (scanId) =>
 // ─── Phishing ─────────────────────────────────────────────────────────────────
 export const analyzePhishing = (data) =>
   API.post('/api/phishing/analyze', data).then(r => r.data)
+
+export const analyzeConversation = (data) =>
+  API.post('/api/phishing/analyze-conversation', data).then(r => r.data)
+
+// ─── Predictive Threat Scoring ───────────────────────────────────────────────
+export const predictThreat = (data) =>
+  API.post('/api/predict', data).then(r => r.data)
 
 export const getPhishingHistory = (userId) =>
   API.get(`/api/phishing/history/${userId}`).then(r => r.data)

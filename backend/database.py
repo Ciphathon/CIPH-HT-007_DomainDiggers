@@ -265,3 +265,64 @@ async def update_scan_simulation(scan_id: int, simulation: dict):
         if scan:
             scan.simulation_json = json.dumps(simulation)
             await db.commit()
+
+
+def _calculate_score_from_findings(findings: list) -> dict:
+    """
+    Keep score logic consistent with scanners/orchestrator.py.
+    """
+    categories = {
+        "email": {"max": 30, "earned": 0},
+        "ssl": {"max": 25, "earned": 0},
+        "headers": {"max": 20, "earned": 0},
+        "network": {"max": 15, "earned": 0},
+        "exposure": {"max": 10, "earned": 0},
+    }
+
+    for f in findings:
+        cat = f.get("category", "")
+        impact = f.get("score_impact", 0)
+        if cat in categories:
+            categories[cat]["earned"] = min(categories[cat]["earned"] + impact, categories[cat]["max"])
+
+    total = sum(v["earned"] for v in categories.values())
+    max_total = sum(v["max"] for v in categories.values())
+
+    return {
+        "total": int(total),
+        "max": max_total,
+        "categories": {k: {"earned": v["earned"], "max": v["max"]} for k, v in categories.items()},
+    }
+
+
+async def update_scan_score(scan_id: int, updated_findings: list) -> dict:
+    """
+    Update scan findings, then recalculate score and financial exposure (damage_json).
+    Returns { new_score, points_gained } so the frontend can update the dashboard live.
+    """
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(ScanResult).where(ScanResult.id == scan_id))
+        scan = result.scalar_one_or_none()
+        if not scan:
+            return {"new_score": 0, "points_gained": 0, "message": "Scan not found"}
+
+        old_score = scan.score or 0
+
+        scan.findings_json = json.dumps(updated_findings)
+
+        score_data = _calculate_score_from_findings(updated_findings)
+        scan.score = score_data["total"]
+
+        from ai.damage_calculator import calculate_damage
+
+        damage = await calculate_damage(updated_findings)
+        scan.damage_json = json.dumps(damage)
+
+        await db.commit()
+        await db.refresh(scan)
+
+        new_score = scan.score or 0
+        points_gained = max(0, int(new_score) - int(old_score))
+        return {"new_score": int(new_score), "points_gained": int(points_gained)}

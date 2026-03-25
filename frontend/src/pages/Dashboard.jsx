@@ -2,7 +2,12 @@ import { useState, useEffect } from 'react'
 import { useUser, UserButton } from '@clerk/clerk-react'
 import { Link } from 'react-router-dom'
 import ScoreGauge from '../components/ScoreGauge.jsx'
-import { scanDomain, getUserProfile } from '../api/secureiq.js'
+import Chatbot from '../components/Chatbot.jsx'
+import HackerSimulation from '../components/HackerSimulation.jsx'
+import FindingCard from '../components/FindingCard.jsx'
+import PredictiveThreat from '../components/PredictiveThreat.jsx'
+import LivingSecurityScore from '../components/LivingSecurityScore.jsx'
+import { scanDomain, getUserProfile, getScanById } from '../api/secureiq.js'
 
 export default function Dashboard() {
   const { user } = useUser()
@@ -12,9 +17,6 @@ export default function Dashboard() {
   const [userProfile, setUserProfile] = useState(null)
   const [error, setError] = useState(null)
   const [activeFilter, setActiveFilter] = useState('all')
-  const [showChat, setShowChat] = useState(false)
-  const [chatInput, setChatInput] = useState('')
-  const [terminalText, setTerminalText] = useState('')
   const [displayRisk, setDisplayRisk] = useState(0)
 
   useEffect(() => {
@@ -38,6 +40,15 @@ export default function Dashboard() {
     setIsScanning(false)
   }
 
+  const handleScoreUpdate = async () => {
+    // Re-fetch the scan so score + financial exposure update live.
+    if (!scanResult?.scan_id) return
+    try {
+      const updated = await getScanById(scanResult.scan_id)
+      setScanResult(updated)
+    } catch (e) {}
+  }
+
   useEffect(() => {
     if (!scanResult?.damage?.total_financial_risk) return
     const target = scanResult.damage.total_financial_risk
@@ -55,37 +66,7 @@ export default function Dashboard() {
     return () => cancelAnimationFrame(rafId)
   }, [scanResult])
 
-  useEffect(() => {
-    if (!scanResult?.findings?.length) return
-    const critical = scanResult.findings.filter(f => f.status === 'critical').slice(0, 2)
-    const lines = [
-      '$ nmap -sV target',
-      '$ enumerate --dns --headers --email',
-      ...critical.map(c => `! ${String(c.check).toUpperCase()} DETECTED`),
-    ]
-    let buffer = ''
-    let charIndex = 0
-    let lineIndex = 0
-    let timeoutId = 0
-    const typeLine = () => {
-      const line = lines[lineIndex] || ''
-      if (charIndex < line.length) {
-        buffer += line[charIndex]
-        setTerminalText(buffer)
-        charIndex += 1
-        timeoutId = window.setTimeout(typeLine, 30)
-      } else if (lineIndex < lines.length - 1) {
-        buffer += '\n'
-        setTerminalText(buffer)
-        lineIndex += 1
-        charIndex = 0
-        timeoutId = window.setTimeout(typeLine, 500)
-      }
-    }
-    setTerminalText('')
-    typeLine()
-    return () => clearTimeout(timeoutId)
-  }, [scanResult])
+  // Note: the threat simulation UI is handled entirely by <HackerSimulation />
 
   const filteredFindings = scanResult?.findings?.filter(f => {
     if (activeFilter === 'all') return true
@@ -118,6 +99,24 @@ export default function Dashboard() {
           </div>
           <div className="ml-auto flex items-center gap-3">
             <span className="label-sm">- {user?.firstName || 'OPERATOR'}</span>
+            <Link
+              to="/phishing-detector"
+              className="btn-ghost"
+              style={{
+                border: '1px solid #35211A',
+                padding: '6px 10px',
+                borderRadius: '4px',
+                color: '#B6A596',
+                textDecoration: 'none',
+                fontFamily: "'General Sans', sans-serif",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Phishing Analyzer -
+            </Link>
             <UserButton afterSignOutUrl="/" />
           </div>
         </div>
@@ -163,6 +162,10 @@ export default function Dashboard() {
               </div>
             </section>
 
+            <PredictiveThreat scanResult={scanResult} userProfile={userProfile} />
+
+            <LivingSecurityScore scanResult={scanResult} />
+
             <section className="border-t pt-8" style={{ borderColor: '#35211A' }}>
               <p className="label-accent mb-6">- FINANCIAL EXPOSURE ANALYSIS</p>
               <p className="display-lg" style={{ color: '#DC9F85' }}>
@@ -174,34 +177,16 @@ export default function Dashboard() {
                 <p className="label-sm" style={{ color: '#35211A' }}>EXPOSURE</p>
                 <p className="label-sm" style={{ color: '#35211A' }}>STATUS</p>
               </div>
-              {(scanResult.damage?.damage_breakdown || []).map(item => (
-                <div key={item.vulnerability} className="grid grid-cols-3 py-3 border-b" style={{ borderColor: '#35211A' }}>
-                  <p className="label-sm">{item.vulnerability}</p>
-                  <p className="label-sm" style={{ color: '#DC9F85' }}>{item.formatted_cost}</p>
-                  <p className="status-dot critical label-sm">ACTIVE</p>
+              {(scanResult.damage?.finding_costs || []).map((fc, idx) => (
+                <div key={`${fc.check || 'item'}-${idx}`} className="grid grid-cols-3 py-3 border-b" style={{ borderColor: '#35211A' }}>
+                  <p className="label-sm">{fc.label || fc.check}</p>
+                  <p className="label-sm" style={{ color: '#DC9F85' }}>{fc.formatted_cost}</p>
+                  <p className={`status-dot ${fc.status === 'critical' ? 'critical' : 'warning'} label-sm`}>ACTIVE</p>
                 </div>
               ))}
             </section>
 
-            <section>
-              <p className="label-accent mb-4">- THREAT SIMULATION MODE</p>
-              <div style={{ background: '#0D0D0D', border: '1px solid #35211A', borderRadius: 4 }}>
-                <div className="px-4 py-2 border-b flex items-center justify-between" style={{ borderColor: '#35211A', background: '#141414' }}>
-                  <div className="flex gap-2">{[1, 2, 3].map(n => <span key={n} style={{ width: 8, height: 8, borderRadius: '50%', background: '#35211A' }} />)}</div>
-                  <p className="label-sm">ROOT@ATTACKER - BASH</p>
-                  <span />
-                </div>
-                <pre className="p-4" style={{ color: '#B6A596', fontSize: 13, minHeight: 150, whiteSpace: 'pre-wrap' }}>
-                  {terminalText.split('\n').map((line, i) => (
-                    <span key={`${line}-${i}`} style={{ display: 'block', color: line.startsWith('$') ? '#DC9F85' : line.startsWith('!') ? '#EBDCC4' : '#B6A596' }}>
-                      {line}
-                    </span>
-                  ))}
-                  <span className="terminal-cursor" />
-                </pre>
-              </div>
-              <button className="btn-danger mt-4">INITIATE SIMULATION -</button>
-            </section>
+            <HackerSimulation scanResult={scanResult} userProfile={userProfile} />
 
             <section>
               <div className="flex items-center justify-between">
@@ -218,23 +203,18 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="divider my-4" />
-              {filteredFindings.map((f, idx) => (
-                <details key={`${f.check}-${idx}`} className="border-b py-4" style={{ borderColor: '#35211A' }}>
-                  <summary className="grid grid-cols-12 gap-4 list-none cursor-pointer">
-                    <span className={`status-dot label-sm ${f.status === 'critical' ? 'critical' : f.status === 'warning' ? 'warning' : 'pass'} col-span-3`}>
-                      {String(f.status).toUpperCase()}
-                    </span>
-                    <span className="col-span-7" style={{ color: '#EBDCC4', fontWeight: 500 }}>{f.check}</span>
-                    <span className="label-sm col-span-2 text-right" style={{ color: '#DC9F85' }}>VIEW FIX -</span>
-                  </summary>
-                  <div className="mt-4 p-6" style={{ background: '#141414', borderLeft: '2px solid #DC9F85' }}>
-                    <p className="body-copy">{f.explanation || f.detail}</p>
-                    <code style={{ display: 'block', marginTop: 12, padding: 12, background: '#0D0D0D', border: '1px solid #35211A', color: '#DC9F85' }}>
-                      {f.fix_steps || 'Review DNS records, update server config, then verify with a fresh scan.'}
-                    </code>
-                  </div>
-                </details>
-              ))}
+              <div className="space-y-3">
+                {filteredFindings.map((f, idx) => (
+                  <FindingCard
+                    key={`${f.check}-${idx}`}
+                    finding={f}
+                    scanId={scanResult.scan_id}
+                    domain={scanResult.domain}
+                    scanResult={scanResult}
+                    onScoreUpdate={handleScoreUpdate}
+                  />
+                ))}
+              </div>
             </section>
 
             {scanResult.attack_chain?.has_chain && (
@@ -282,31 +262,18 @@ export default function Dashboard() {
         )}
       </div>
 
-      <div style={{ position: 'fixed', right: 24, bottom: 24, width: showChat ? 320 : 'auto' }}>
-        {!showChat ? (
-          <button onClick={() => setShowChat(true)} className="px-4 py-3 border" style={{ borderColor: '#35211A', background: '#1E1E1E', borderRadius: 4 }}>
-            <span className="label-sm">ASK SECUREIQ -</span>
-          </button>
-        ) : (
-          <div style={{ width: 320, height: 440, border: '1px solid #35211A', background: '#1E1E1E', borderRadius: 4, display: 'flex', flexDirection: 'column' }}>
-            <div className="px-4 py-3 flex justify-between border-b" style={{ borderColor: '#35211A' }}>
-              <p className="label-sm">SECUREIQ AI</p>
-              <button className="label-sm" onClick={() => setShowChat(false)}>- CLOSE</button>
-            </div>
-            <div className="p-4 flex-1 overflow-auto">
-              <p className="body-copy">I can explain this scan, prioritize fixes, and estimate business impact.</p>
-              {chatInput && <>
-                <div className="divider my-3" />
-                <p className="body-copy text-right" style={{ color: '#EBDCC4' }}>{chatInput}</p>
-              </>}
-            </div>
-            <div className="border-t p-3 flex items-center gap-2" style={{ borderColor: '#35211A' }}>
-              <input className="bg-transparent flex-1 outline-none" value={chatInput} onChange={e => setChatInput(e.target.value)} />
-              <button className="label-sm" style={{ color: '#DC9F85' }}>SEND -</button>
-            </div>
-          </div>
-        )}
-      </div>
+      <Chatbot
+        scanContext={
+          scanResult
+            ? {
+                domain: scanResult.domain,
+                score: scanResult.score,
+                critical_count: scanResult.critical_count,
+                warning_count: scanResult.warning_count,
+              }
+            : {}
+        }
+      />
     </div>
   )
 }

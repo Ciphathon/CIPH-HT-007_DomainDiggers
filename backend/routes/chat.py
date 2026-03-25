@@ -1,9 +1,18 @@
+import json
+from datetime import datetime, timezone
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from datetime import datetime
+
 from ai.llm_client import call_llm
 
 router = APIRouter(tags=["chat"])
+
+SYSTEM_PROMPT = (
+    "You are SecureIQ AI assistant for Indian small businesses. "
+    "Answer questions about the security scan in plain English. "
+    "Be helpful, specific, and concise. Max 100 words."
+)
 
 
 class ChatRequest(BaseModel):
@@ -14,24 +23,15 @@ class ChatRequest(BaseModel):
 
 @router.post("/chat")
 async def chat(req: ChatRequest):
-    ctx = req.scan_context
-    domain = ctx.get("domain", "your website")
-    score = ctx.get("score", "N/A")
-    critical = ctx.get("critical_count", 0)
-    warning = ctx.get("warning_count", 0)
-
-    system = (
-        f"You are SecureIQ AI, a friendly cybersecurity assistant. "
-        f"The user's website is {domain} with a security score of {score}/100. "
-        f"There are {critical} critical issues and {warning} warnings. "
-        f"Answer their security question in simple, plain English. "
-        f"Max 120 words. Be specific to their scan results. "
-        f"Use Indian context (UPI, GST, customers) when relevant."
+    user_content = (
+        f"Scan: {json.dumps(req.scan_context, default=str)} "
+        f"Question: {req.message}"
     )
-
-    response = await call_llm(system, req.message)
-
-    return {
-        "response": response,
-        "timestamp": datetime.utcnow().isoformat(),
-    }
+    text = await call_llm(SYSTEM_PROMPT, user_content)
+    ts = datetime.now(timezone.utc).isoformat()
+    return JSONResponse(
+        content={
+            "response": text,
+            "timestamp": ts,
+        }
+    )
