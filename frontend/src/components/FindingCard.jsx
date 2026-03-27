@@ -1,16 +1,17 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronDown, Copy, Check, Loader, CheckCircle, AlertCircle } from 'lucide-react'
-import { generateAutoFix, verifyAutoFix, verifyFix } from '../api/secureiq.js'
+import { deployAutoFixGoDaddy, generateAutoFix, verifyAutoFix, verifyFix } from '../api/secureiq.js'
 
 // autoFixPhase: idle | loading | steps_shown | verifying | fixed | failed
-export default function FindingCard({ finding, scanId, domain, scanResult, onScoreUpdate }) {
+export default function FindingCard({ finding, scanId, domain, scanResult, userProfile, onScoreUpdate }) {
   const [expanded, setExpanded] = useState(false)
   const [copied, setCopied] = useState(null)
   const [autoFixPhase, setAutoFixPhase] = useState('idle')
   const [generatedRecord, setGeneratedRecord] = useState(null)
   const [autoFixMessage, setAutoFixMessage] = useState('')
   const [pointsGained, setPointsGained] = useState(0)
+  const [deployingProvider, setDeployingProvider] = useState('')
 
   const fix = finding.fixes || {}
   const borderColor = { critical: 'var(--red)', warning: 'var(--yellow)', pass: 'var(--green)', info: 'var(--blue)' }[finding.status] || 'var(--border)'
@@ -18,6 +19,13 @@ export default function FindingCard({ finding, scanId, domain, scanResult, onSco
     c => String(c).toLowerCase() === String(finding.check).toLowerCase()
   )
   const isFixable = finding.status !== 'pass' && finding.status !== 'info'
+  const providerHint = String(
+    userProfile?.hosting_provider ||
+    scanResult?.hosting_provider ||
+    scanResult?.hostingProvider ||
+    ''
+  )
+  const canDeployGoDaddy = /godaddy/i.test(providerHint)
 
   const copy = (text, key) => {
     navigator.clipboard.writeText(text)
@@ -143,6 +151,32 @@ export default function FindingCard({ finding, scanId, domain, scanResult, onSco
     setGeneratedRecord(null)
     setAutoFixMessage('')
     setPointsGained(0)
+    setDeployingProvider('')
+  }
+
+  const handleDeployGoDaddy = async () => {
+    if (!generatedRecord?.record_value || deployingProvider) return
+    setDeployingProvider('godaddy')
+    setAutoFixMessage('')
+    try {
+      const res = await deployAutoFixGoDaddy({
+        domain,
+        check_name: finding.check,
+        record_type: generatedRecord.record_type || 'TXT',
+        record_name: generatedRecord.record_name || '@',
+        record_value: generatedRecord.record_value,
+        ttl: generatedRecord.ttl || 600,
+      })
+      if (res?.deployed) {
+        setAutoFixMessage(`${res.message} DNS propagation can still take a few minutes. Then click "Update My Score".`)
+      } else {
+        setAutoFixMessage(res?.message || 'GoDaddy deployment failed. Use the manual steps below.')
+      }
+    } catch (e) {
+      setAutoFixMessage('GoDaddy deployment failed. Use the manual steps below or check backend credentials.')
+    } finally {
+      setDeployingProvider('')
+    }
   }
 
   return (
@@ -355,6 +389,41 @@ export default function FindingCard({ finding, scanId, domain, scanResult, onSco
                             <p style={{ color: '#B6A596', fontSize: '11px', marginTop: 10 }}>
                               ⏱ Time needed: {generatedRecord.time_estimate}
                             </p>
+                          )}
+                          {canDeployGoDaddy && (
+                            <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                              <p style={{ color: 'var(--text-2)', fontSize: '11px', marginBottom: 10 }}>
+                                GoDaddy detected from your setup. You can push this TXT record directly from SecureIQ.
+                              </p>
+                              <button
+                                onClick={handleDeployGoDaddy}
+                                disabled={deployingProvider === 'godaddy'}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  gap: 8,
+                                  width: '100%',
+                                  padding: '12px 14px',
+                                  borderRadius: 10,
+                                  fontSize: '12px',
+                                  fontWeight: '700',
+                                  background: deployingProvider === 'godaddy' ? 'rgba(220,159,133,0.08)' : 'rgba(220,159,133,0.14)',
+                                  border: '1px solid rgba(220,159,133,0.3)',
+                                  color: 'var(--accent)',
+                                  cursor: deployingProvider === 'godaddy' ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                {deployingProvider === 'godaddy' ? (
+                                  <>
+                                    <Loader size={14} style={{ animation: 'spin 1s linear infinite' }} />
+                                    Deploying to GoDaddy…
+                                  </>
+                                ) : (
+                                  <>GoDaddy One-Click Deploy</>
+                                )}
+                              </button>
+                            </div>
                           )}
                         </div>
                       )}

@@ -4,6 +4,7 @@ import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 from groq import Groq
+import httpx
 
 from database import get_scan_by_id, update_scan_score
 from scanners.email_security import check_email_security
@@ -25,6 +26,15 @@ class VerifyAutoFixRequest(BaseModel):
     check_name: str
     expected_value: str
     scan_id: int
+
+
+class GoDaddyDeployRequest(BaseModel):
+    domain: str
+    check_name: str
+    record_type: str
+    record_name: str
+    record_value: str
+    ttl: int = 600
 
 
 def _clean_domain(domain: str) -> str:
@@ -73,6 +83,46 @@ def _normalize_expected(expected: str) -> str:
     if expected is None:
         return ""
     return str(expected).strip().strip('"').strip("'")
+
+
+def _godaddy_host(record_name: str, domain: str) -> str:
+    name = (record_name or "").strip().rstrip(".")
+    root_variants = {"@", domain, f"@.{domain}"}
+    if not name or name in root_variants:
+        return "@"
+    suffix = f".{domain}"
+    if name.endswith(suffix):
+        name = name[: -len(suffix)]
+    if name == domain:
+        return "@"
+    return name or "@"
+
+
+async def _deploy_godaddy_txt_record(domain: str, host: str, value: str, ttl: int) -> tuple[bool, str]:
+    api_key = os.getenv("GODADDY_API_KEY", "").strip()
+    api_secret = os.getenv("GODADDY_API_SECRET", "").strip()
+    api_base = os.getenv("GODADDY_API_BASE", "https://api.godaddy.com").rstrip("/")
+
+    if not api_key or not api_secret:
+        return False, "GoDaddy API credentials are not configured on the backend."
+
+    url = f"{api_base}/v1/domains/{domain}/records/TXT/{host}"
+    headers = {
+        "Authorization": f"sso-key {api_key}:{api_secret}",
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+    payload = [{"data": value, "ttl": int(ttl or 600)}]
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.put(url, headers=headers, json=payload)
+        if response.status_code in {200, 201, 204}:
+            return True, "Record deployed to GoDaddy DNS."
+        body = response.text[:300]
+        return False, f"GoDaddy API error ({response.status_code}): {body}"
+    except Exception as exc:
+        return False, f"GoDaddy deployment failed: {str(exc)}"
 
 
 @router.post("/autofix/generate-record")
@@ -181,6 +231,39 @@ Return a JSON array of step strings, e.g.:
 
     parsed["human_steps"] = human_steps
     return parsed
+
+
+@router.post("/autofix/deploy-godaddy")
+async def deploy_auto_fix_godaddy(req: GoDaddyDeployRequest):
+    domain = _clean_domain(req.domain)
+    check_name = (req.check_name or "").strip()
+    record_type = (req.record_type or "TXT").strip().upper()
+    record_name = (req.record_name or "").strip()
+    record_value = _normalize_expected(req.record_value)
+    ttl = int(req.ttl or 600)
+
+    if record_type != "TXT":
+        return {"deployed": False, "message": "GoDaddy MVP deployment currently supports TXT records only."}
+
+    if check_name.lower() not in {"spf record", "dmarc policy", "dkim signing"}:
+        return {"deployed": False, "message": "GoDaddy MVP deployment currently supports SPF, DMARC, and DKIM only."}
+
+    if not record_value:
+        return {"deployed": False, "message": "No DNS record value provided for deployment."}
+
+    host = _godaddy_host(record_name, domain)
+    deployed, message = await _deploy_godaddy_txt_record(domain, host, record_value, ttl)
+
+    return {
+        "deployed": deployed,
+        "message": message,
+        "provider": "GoDaddy",
+        "record_type": "TXT",
+        "record_name": host,
+        "record_value": record_value,
+        "ttl": ttl,
+        "next_step": "Use SecureIQ verification after DNS propagation to update the score.",
+    }
 
 
 def _default_human_steps(check_name: str, record_name: str, record_value: str) -> list:

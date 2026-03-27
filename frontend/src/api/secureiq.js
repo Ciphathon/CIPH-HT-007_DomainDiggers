@@ -43,6 +43,9 @@ export const verifyFix = (scanId, checkName, domain) =>
 export const generateAutoFix = (payload) =>
   API.post('/api/autofix/generate-record', payload).then(r => r.data)
 
+export const deployAutoFixGoDaddy = (payload) =>
+  API.post('/api/autofix/deploy-godaddy', payload).then(r => r.data)
+
 export const verifyAutoFix = (payload) =>
   API.post('/api/autofix/verify-applied', payload).then(r => r.data)
 

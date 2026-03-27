@@ -376,6 +376,7 @@ export default function Dashboard() {
                     scanId={scanResult.scan_id}
                     domain={scanResult.domain}
                     scanResult={scanResult}
+                    userProfile={userProfile}
                     onScoreUpdate={handleScoreUpdate}
                   />
                 ))}
