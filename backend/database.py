@@ -317,7 +317,12 @@ async def update_scan_score(scan_id: int, updated_findings: list) -> dict:
 
         from ai.damage_calculator import calculate_damage
 
-        damage = await calculate_damage(updated_findings)
+        profile = await get_user_profile(scan.clerk_user_id) if scan.clerk_user_id else None
+        damage = await calculate_damage(
+            updated_findings,
+            score=scan.score,
+            profile=profile,
+        )
         scan.damage_json = json.dumps(damage)
 
         await db.commit()

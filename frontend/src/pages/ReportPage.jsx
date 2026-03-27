@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Printer } from 'lucide-react'
-import { getReportData } from '../api/secureiq.js'
+import { ArrowLeft, Download, Printer } from 'lucide-react'
+import { downloadCertificate, getReportData } from '../api/secureiq.js'
 
 export default function ReportPage() {
   const { scanId } = useParams()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [downloadingCert, setDownloadingCert] = useState(false)
 
   useEffect(() => {
     getReportData(scanId).then(d => { setData(d); setLoading(false) }).catch(() => setLoading(false))
@@ -14,6 +15,23 @@ export default function ReportPage() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}><p style={{ color: 'var(--text-2)' }}>Loading report…</p></div>
   if (!data) return <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--bg)' }}><p style={{ color: 'var(--red)' }}>Report not found</p></div>
+
+  const handleCertificateDownload = async () => {
+    setDownloadingCert(true)
+    try {
+      const blob = await downloadCertificate(scanId)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `secureiq-cert-${data.domain}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (_) {
+      alert('Certificate download failed. Ensure the score is 70+.')
+    } finally {
+      setDownloadingCert(false)
+    }
+  }
 
   const criticals = data.findings?.filter(f => f.status === 'critical') || []
   const warnings = data.findings?.filter(f => f.status === 'warning') || []
@@ -28,6 +46,11 @@ export default function ReportPage() {
         <button onClick={() => window.print()} className="ml-auto btn-ghost" style={{ color: '#181818', borderColor: '#66473B' }}>
           <Printer size={14} /> PRINT / SAVE PDF
         </button>
+        {data.score >= 70 && (
+          <button onClick={handleCertificateDownload} disabled={downloadingCert} className="btn-ghost" style={{ color: '#181818', borderColor: '#66473B' }}>
+            <Download size={14} /> {downloadingCert ? 'GENERATING CERTIFICATE…' : 'DOWNLOAD CERTIFICATE'}
+          </button>
+        )}
       </div>
 
       <div className="max-w-5xl mx-auto px-10 py-10">

@@ -10,6 +10,7 @@ import PredictiveThreat from "../components/PredictiveThreat.jsx"
 import LivingSecurityScore from "../components/LivingSecurityScore.jsx"
 import DamageCalculator from "../components/DamageCalculator.jsx"
 import AttackChain from "../components/AttackChain.jsx"
+import SecurityCertificate from "../components/SecurityCertificate.jsx"
 import { getScanById, getUserProfile, scanDomain } from "../api/secureiq.js"
 
 const SCORE_CATEGORIES = [
@@ -310,6 +311,12 @@ export default function Dashboard() {
                 })}
               </div>
             </section>
+
+            <SecurityCertificate
+              scanId={scanResult.scan_id}
+              domain={scanResult.domain}
+              score={scanResult.score}
+            />
 
             <PredictiveThreat scanResult={scanResult} userProfile={fallbackProfile} />
 

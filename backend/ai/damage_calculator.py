@@ -1,4 +1,5 @@
 INDUSTRY_MULTIPLIERS = {
+    "ecommerce": 2.5,
     "e-commerce": 2.5,
     "fintech": 3.0,
     "healthcare": 2.8,
@@ -13,7 +14,32 @@ INDUSTRY_MULTIPLIERS = {
     "banking": 3.5,
     "ngo": 1.0,
     "small_business": 1.3,
+    "other": 1.5,
     "default": 1.5,
+}
+
+VISITOR_MULTIPLIERS = {
+    "under_1k": 0.6,
+    "1k_10k": 1.1,
+    "10k_100k": 2.2,
+    "100k_plus": 4.0,
+    "1000_to_10000": 1.1,
+}
+
+VISITOR_BASELINES = {
+    "under_1k": 800,
+    "1k_10k": 5000,
+    "10k_100k": 50000,
+    "100k_plus": 500000,
+    "1000_to_10000": 5000,
+}
+
+BRAND_FLOORS = {
+    "under_1k": 150000,
+    "1k_10k": 600000,
+    "10k_100k": 2500000,
+    "100k_plus": 9000000,
+    "1000_to_10000": 600000,
 }
 
 FINDING_DAMAGE_MAP = {
@@ -79,20 +105,34 @@ FINDING_DAMAGE_MAP = {
     },
 }
 
-VISITOR_MULTIPLIERS = {
-    "under_1k": 0.5,
-    "1k_10k": 1.0,
-    "10k_100k": 2.5,
-    "100k_plus": 5.0,
-}
+
+def _normalize_type(business_type: str) -> str:
+    return (business_type or "default").strip().lower().replace(" ", "_")
+
+
+def _profile_value(profile, key: str, default=None):
+    if profile is None:
+        return default
+    if isinstance(profile, dict):
+        return profile.get(key, default)
+    return getattr(profile, key, default)
+
+
+def _finding_damage_info(check_name: str) -> dict:
+    check_name_l = (check_name or "").lower()
+    for key, value in FINDING_DAMAGE_MAP.items():
+        key_l = key.lower()
+        if key_l in check_name_l or check_name_l in key_l:
+            return value
+    return FINDING_DAMAGE_MAP["default"]
 
 
 def format_rupees(amount: int) -> str:
     if amount >= 10000000:
         return f"₹{amount / 10000000:.1f} Cr"
-    elif amount >= 100000:
+    if amount >= 100000:
         return f"₹{amount / 100000:.1f}L"
-    elif amount >= 1000:
+    if amount >= 1000:
         return f"₹{amount / 1000:.0f}K"
     return f"₹{amount}"
 
@@ -102,64 +142,91 @@ async def calculate_damage(
     business_type: str = "small_business",
     monthly_visitors: str = "1k_10k",
     has_payment_processing: bool = False,
+    has_customer_data: bool = False,
+    has_user_login: bool = False,
+    score: int = 50,
+    profile=None,
 ) -> dict:
-    industry_mult = INDUSTRY_MULTIPLIERS.get(
-        business_type.lower().replace(" ", "_"),
-        INDUSTRY_MULTIPLIERS["default"]
-    )
-    visitor_mult = VISITOR_MULTIPLIERS.get(monthly_visitors, 1.0)
-    payment_mult = 1.5 if has_payment_processing else 1.0
+    business_type = _profile_value(profile, "website_type", business_type)
+    monthly_visitors = _profile_value(profile, "monthly_visitors", monthly_visitors)
+    has_payment_processing = bool(_profile_value(profile, "has_payment_processing", has_payment_processing))
+    has_customer_data = bool(_profile_value(profile, "has_customer_data", has_customer_data))
+    has_user_login = bool(_profile_value(profile, "has_user_login", has_user_login))
+
+    normalized_type = _normalize_type(business_type)
+    industry_mult = INDUSTRY_MULTIPLIERS.get(normalized_type, INDUSTRY_MULTIPLIERS["default"])
+    visitor_mult = VISITOR_MULTIPLIERS.get(monthly_visitors, VISITOR_MULTIPLIERS["1k_10k"])
+    payment_mult = 1.35 if has_payment_processing else 1.0
+    trust_mult = 1.0
+    if has_customer_data:
+        trust_mult += 0.3
+    if has_user_login:
+        trust_mult += 0.2
+    if has_payment_processing:
+        trust_mult += 0.2
+
+    actionable = [f for f in findings if f.get("status") in {"critical", "warning"}]
+    critical_count = sum(1 for f in actionable if f.get("status") == "critical")
+    warning_count = sum(1 for f in actionable if f.get("status") == "warning")
+    score_penalty = max(0, min(1, (100 - (score or 50)) / 100))
+    exploitability = 0.9 + (critical_count * 0.22) + (warning_count * 0.09) + (score_penalty * 1.1)
+    business_impact = 0.95 + (visitor_mult * 0.4) + ((industry_mult - 1) * 0.35) + ((trust_mult - 1) * 0.9)
 
     total = 0
     finding_costs = []
+    customer_baseline = VISITOR_BASELINES.get(monthly_visitors, VISITOR_BASELINES["1k_10k"])
 
-    critical_findings = [f for f in findings if f.get("status") == "critical"]
-    warning_findings = [f for f in findings if f.get("status") == "warning"]
-    actionable = critical_findings + warning_findings
-
-    for f in actionable:
-        check_name = f.get("check", "")
-        # Find matching damage map entry
-        damage_info = None
-        for key, val in FINDING_DAMAGE_MAP.items():
-            if key.lower() in check_name.lower() or check_name.lower() in key.lower():
-                damage_info = val
-                break
-        if not damage_info:
-            damage_info = FINDING_DAMAGE_MAP["default"]
-
-        severity_mult = 1.5 if f.get("status") == "critical" else 0.8
-        cost = int(
+    for finding in actionable:
+        check_name = finding.get("check", "")
+        damage_info = _finding_damage_info(check_name)
+        severity_mult = 1.65 if finding.get("status") == "critical" else 0.95
+        estimated_cost = int(
             damage_info["base_cost"]
-            * industry_mult
-            * visitor_mult
+            * severity_mult
+            * exploitability
+            * business_impact
             * payment_mult
-            * severity_mult
         )
-        total += cost
+        total += estimated_cost
 
-        affected = int(
-            ({"under_1k": 500, "1k_10k": 5000, "10k_100k": 50000, "100k_plus": 500000}.get(monthly_visitors, 1000))
-            * 0.3
-            * severity_mult
+        affected_customers = int(
+            customer_baseline
+            * min(0.8, 0.16 + (0.12 if finding.get("status") == "critical" else 0.05) + (score_penalty * 0.22))
         )
 
         finding_costs.append({
             "check": check_name,
             "label": damage_info["label"],
-            "status": f.get("status"),
+            "status": finding.get("status"),
             "risks": damage_info["risks"],
-            "estimated_cost": cost,
-            "formatted_cost": format_rupees(cost),
-            "affected_customers": affected,
+            "estimated_cost": estimated_cost,
+            "formatted_cost": format_rupees(estimated_cost),
+            "affected_customers": affected_customers,
         })
+
+    brand_floor = int(
+        BRAND_FLOORS.get(monthly_visitors, BRAND_FLOORS["1k_10k"])
+        * (0.65 + (critical_count * 0.18) + (warning_count * 0.07) + (score_penalty * 0.6))
+        * (1 + ((industry_mult - 1) * 0.45))
+        * (1 + ((trust_mult - 1) * 0.8))
+    )
+
+    total = max(total, brand_floor) if actionable else 0
+
+    for finding in finding_costs:
+        if total > 0:
+            share = finding["estimated_cost"] / total
+            finding["affected_customers"] = max(
+                finding["affected_customers"],
+                int(customer_baseline * min(0.85, 0.08 + (share * 0.95)))
+            )
 
     industry_avg = 70 if industry_mult > 2 else 55
 
     time_parts = []
-    if any(f["status"] == "critical" for f in finding_costs if "status" in f):
+    if critical_count:
         time_parts.append("critical fixes: 2-4 hours")
-    if any(f["status"] == "warning" for f in finding_costs if "status" in f):
+    if warning_count:
         time_parts.append("warning fixes: 4-8 hours")
 
     return {
@@ -167,9 +234,18 @@ async def calculate_damage(
         "formatted_total": format_rupees(total),
         "finding_costs": finding_costs,
         "industry_avg_score": industry_avg,
+        "brand_value_floor": brand_floor,
+        "formatted_brand_value_floor": format_rupees(brand_floor),
+        "loss_model": {
+            "security_pressure": round(exploitability, 2),
+            "business_impact": round(business_impact, 2),
+            "industry_multiplier": round(industry_mult, 2),
+            "visitor_multiplier": round(visitor_mult, 2),
+            "trust_multiplier": round(trust_mult, 2),
+        },
         "prevention_message": (
-            f"These {len(actionable)} issues could cost your business up to {format_rupees(total)}. "
-            f"Most fixes take a developer less than a day to implement."
+            f"These {len(actionable)} issues expose both technical weaknesses and brand-value downside. "
+            f"For your business profile, the 30-day loss exposure can reach {format_rupees(total)} even if the raw issue count is lower."
         ),
         "time_to_fix_all": " | ".join(time_parts) if time_parts else "4-8 hours total",
     }

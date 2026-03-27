@@ -6,6 +6,7 @@ from database import (
     save_scan_result,
     get_scan_by_id,
     get_scan_history,
+    get_user_profile,
     update_scan_simulation,
     update_scan_score,
 )
@@ -67,6 +68,7 @@ def _score_breakdown_from_findings(findings: list) -> dict:
 @router.post("/scan")
 async def start_scan(req: ScanRequest):
     domain = clean_domain(req.domain)
+    profile = await get_user_profile(req.clerk_user_id)
 
     # Run all scanners
     scan_data = await run_full_scan(domain, req.clerk_user_id)
@@ -77,7 +79,11 @@ async def start_scan(req: ScanRequest):
     )
     attack_chain = await generate_attack_chain(findings, domain)
     fixes = await generate_fixes(findings, domain, scan_data["hosting_provider"])
-    damage = await calculate_damage(findings)
+    damage = await calculate_damage(
+        findings,
+        score=scan_data.get("score", 50),
+        profile=profile,
+    )
 
     # Attach per-finding fixes for consistent frontend rendering
     if isinstance(fixes, dict):

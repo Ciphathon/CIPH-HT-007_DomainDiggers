@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { Award, Lock, Download, CheckCircle } from 'lucide-react'
+import { Award, Lock, Download, ShieldCheck } from 'lucide-react'
 import { checkCertificateEligibility, downloadCertificate } from '../api/secureiq.js'
 
 export default function SecurityCertificate({ scanId, domain, score }) {
@@ -33,10 +33,10 @@ export default function SecurityCertificate({ scanId, domain, score }) {
 
   if (!eligibility.eligible) {
     return (
-      <div className="card" style={{ opacity: 0.7 }}>
+      <div className="card" style={{ opacity: 0.9 }}>
         <div className="flex items-center gap-3 mb-3">
           <Lock size={20} style={{ color: 'var(--text-2)' }} />
-          <h3 className="font-display font-bold text-xl" style={{ color: 'var(--text-2)' }}>Security Certificate</h3>
+          <h3 className="font-display font-bold text-xl" style={{ color: 'var(--text-2)' }}>SEQUREIQ Verified Certificate</h3>
         </div>
         <p className="text-sm mb-3" style={{ color: 'var(--text-2)' }}>
           Score {score}/100 — need {eligibility.gap} more points to unlock
@@ -56,9 +56,25 @@ export default function SecurityCertificate({ scanId, domain, score }) {
       className="card"
       style={{ borderColor: 'rgba(63,185,80,0.4)', background: 'linear-gradient(135deg, var(--bg-card) 0%, rgba(63,185,80,0.05) 100%)' }}
     >
-      <div className="flex items-center gap-3 mb-3">
-        <Award size={20} style={{ color: 'var(--green)' }} />
-        <h3 className="font-display font-bold text-xl" style={{ color: 'var(--green)' }}>Security Certificate Unlocked!</h3>
+      <div className="flex items-start justify-between gap-4 mb-4" style={{ flexWrap: 'wrap' }}>
+        <div className="flex items-center gap-3">
+          <Award size={20} style={{ color: 'var(--green)' }} />
+          <div>
+            <h3 className="font-display font-bold text-xl" style={{ color: 'var(--green)' }}>SEQUREIQ Verified Certificate</h3>
+            <p className="text-xs mt-1" style={{ color: 'var(--text-2)' }}>Unlocked at score 70+. Includes scan analysis, score breakdown, and verification stamp.</p>
+          </div>
+        </div>
+        <div
+          className="px-3 py-2 rounded-xl"
+          style={{ background: 'rgba(63,185,80,0.12)', border: '1px solid rgba(63,185,80,0.3)' }}
+        >
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={16} style={{ color: 'var(--green)' }} />
+            <span className="text-xs font-semibold" style={{ color: 'var(--green)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              SEQUREIQ Verified
+            </span>
+          </div>
+        </div>
       </div>
       <p className="text-sm mb-4" style={{ color: 'var(--text-2)' }}>
         {eligibility.message}

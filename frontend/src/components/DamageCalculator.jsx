@@ -28,6 +28,7 @@ export default function DamageCalculator({ damage, scanResult, userProfile }) {
   }
 
   const profileLabel = `${fallbackProfile.website_type || 'other'} • ${fallbackProfile.monthly_visitors || '1000_to_10000'}`
+  const lossModel = resolvedDamage.loss_model
 
   return (
     <div className="card space-y-6">
@@ -38,7 +39,33 @@ export default function DamageCalculator({ damage, scanResult, userProfile }) {
         </p>
         <p className="text-sm mt-1" style={{ color: 'var(--text-2)' }}>{resolvedDamage.formatted_total} estimated potential loss</p>
         <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>Business profile basis: {profileLabel}</p>
+        {resolvedDamage.formatted_brand_value_floor && (
+          <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+            Adaptive floor: {resolvedDamage.formatted_brand_value_floor} based on scale, trust surface, and brand exposure.
+          </p>
+        )}
       </div>
+
+      {lossModel && (
+        <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))' }}>
+          <div className="p-3 rounded-xl" style={{ background: 'var(--bg-card-2)', border: '1px solid var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-2)' }}>Security Pressure</p>
+            <p className="text-lg font-semibold" style={{ color: 'var(--text-1)' }}>{lossModel.security_pressure}x</p>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: 'var(--bg-card-2)', border: '1px solid var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-2)' }}>Business Impact</p>
+            <p className="text-lg font-semibold" style={{ color: 'var(--text-1)' }}>{lossModel.business_impact}x</p>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: 'var(--bg-card-2)', border: '1px solid var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-2)' }}>Visitor Scale</p>
+            <p className="text-lg font-semibold" style={{ color: 'var(--text-1)' }}>{lossModel.visitor_multiplier}x</p>
+          </div>
+          <div className="p-3 rounded-xl" style={{ background: 'var(--bg-card-2)', border: '1px solid var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-2)' }}>Trust Surface</p>
+            <p className="text-lg font-semibold" style={{ color: 'var(--text-1)' }}>{lossModel.trust_multiplier}x</p>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-3">
         {(resolvedDamage.finding_costs || []).map((fc, i) => (
